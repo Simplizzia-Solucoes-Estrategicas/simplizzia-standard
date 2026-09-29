@@ -1,0 +1,58 @@
+# Simplizzia standard CI. Protected file: only the lead changes it.
+# The checks themselves live in {{STANDARD_REPO}} and update from there.
+# The deploy job is per project: when defining the hosting, the lead replaces the deploy
+# script in package.json and adds its credentials as repository secrets here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy this commit (lead only, after reading the report)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    outputs:
+      decision: ${{ steps.standard.outputs.decision }}
+      is_lead: ${{ steps.standard.outputs.is_lead }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: standard
+        uses: {{STANDARD_REPO}}@{{STANDARD_REF}}
+
+  deploy:
+    needs: checks
+    if: >-
+      (github.event_name == 'push' && needs.checks.outputs.decision == 'publish') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy && needs.checks.outputs.is_lead == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Deploy
+        run: npm run deploy
+      - name: Tag deployed commit
+        run: |
+          tag="deploy-$(date -u +%Y%m%d-%H%M%S)"
+          git tag "$tag" && git push origin "$tag"

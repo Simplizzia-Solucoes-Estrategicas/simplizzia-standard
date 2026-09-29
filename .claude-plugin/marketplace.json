@@ -1,0 +1,14 @@
+{
+  "name": "simplizzia",
+  "description": "Padrão de engenharia da Simplizzia para Claude Code",
+  "owner": {
+    "name": "Simplizzia"
+  },
+  "plugins": [
+    {
+      "name": "sz",
+      "source": "./plugins/sz",
+      "description": "Padrão de qualidade e segurança dos projetos da Simplizzia"
+    }
+  ]
+}

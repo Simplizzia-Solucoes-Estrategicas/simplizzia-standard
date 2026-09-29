@@ -1,0 +1,7 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "tier": {{TIER}},
+  "standardVersion": "{{STANDARD_VERSION}}",
+  "nextVersion": "{{NEXT_VERSION}}",
+  "createdAt": "{{DATE}}"
+}

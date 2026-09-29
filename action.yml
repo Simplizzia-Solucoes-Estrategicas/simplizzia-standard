@@ -1,0 +1,70 @@
+# Shared CI checks of the Simplizzia standard. Project workflows call it with
+#   uses: <org>/simplizzia-standard@<ref>
+# after actions/checkout (fetch-depth: 0). The runner downloads this repository with a
+# scoped read token, so projects need no token or variable, as long as this repository's
+# Settings > Actions > General > Access allows repositories in the organization.
+name: Simplizzia standard checks
+description: Typecheck, lint, protected files, mechanical verification, review seal and deploy routing.
+outputs:
+  decision:
+    description: publish | lead-approval | block
+    value: ${{ steps.route.outputs.decision }}
+  is_lead:
+    description: '"true" when the workflow was started by the lead'
+    value: ${{ steps.route.outputs.is_lead }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Install
+      shell: bash
+      run: npm ci
+
+    - name: Typecheck and lint
+      shell: bash
+      run: npm run check
+
+    - name: Base commit
+      id: base
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        BEFORE: ${{ github.event.before }}
+      run: |
+        if [ "$EVENT" = "pull_request" ]; then ref="$PR_BASE"
+        elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then ref="$BEFORE"
+        else ref="HEAD~1"
+        fi
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+    - name: Protected files
+      shell: bash
+      env:
+        BASE: ${{ steps.base.outputs.ref }}
+        ACTOR: ${{ github.actor }}
+      run: node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --ci-protected --base "$BASE" --actor "$ACTOR"
+
+    - name: Mechanical verification
+      shell: bash
+      env:
+        BASE: ${{ steps.base.outputs.ref }}
+      run: node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --scope changes --base "$BASE" --skip-gates --json-out .sz/reports/verify.json
+
+    - name: Route
+      id: route
+      shell: bash
+      env:
+        ACTOR: ${{ github.actor }}
+      run: node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --route --verify .sz/reports/verify.json --actor "$ACTOR"
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: sz-reports
+        path: .sz/reports/
+        if-no-files-found: ignore
