@@ -16,19 +16,19 @@ Crie o repositório privado na organização e suba o conteúdo:
 git init
 git add -A
 git commit -m "chore: padrão Simplizzia 0.1.0"
-gh repo create simplizzia/simplizzia-standard --private --source . --remote origin --push
+gh repo create Simplizzia-Solucoes-Estrategicas/simplizzia-standard --private --source . --remote origin --push
 ```
 
 Por último, no GitHub, abra o repositório do padrão e vá em Settings, Actions, General. Na seção Access, no fim da página, marque a opção que libera o acesso para os repositórios da organização. É isso que deixa o CI de cada projeto usar as checagens daqui sem token.
 
 ## Instalar em cada máquina
 
-A pessoa precisa de Node 20 ou mais novo, Git, Claude Code e acesso de leitura ao repositório do padrão. Um teste simples de acesso: se `git clone https://github.com/simplizzia/simplizzia-standard` funciona na máquina dela, a instalação também funciona. Se não funcionar, `gh auth login` costuma resolver, porque configura a credencial do git junto.
+A pessoa precisa de Node 20 ou mais novo, Git, Claude Code e acesso de leitura ao repositório do padrão. Um teste simples de acesso: se `git clone https://github.com/Simplizzia-Solucoes-Estrategicas/simplizzia-standard` funciona na máquina dela, a instalação também funciona. Se não funcionar, `gh auth login` costuma resolver, porque configura a credencial do git junto.
 
 Com isso, são dois comandos no terminal:
 
 ```
-claude plugin marketplace add simplizzia/simplizzia-standard
+claude plugin marketplace add Simplizzia-Solucoes-Estrategicas/simplizzia-standard
 claude plugin install sz@simplizzia
 ```
 
