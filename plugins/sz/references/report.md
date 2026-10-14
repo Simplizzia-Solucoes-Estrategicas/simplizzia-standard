@@ -40,6 +40,9 @@ Nível {n} · padrão {versão} · escopo: {projeto inteiro | mudanças desde <r
 ## Qualidade
 Achados MÉDIO agrupados por tipo (tamanho, efeitos, cores, pendências), com contagem.
 
+## Pré-existentes                                                 (revisão)
+Problemas que já estavam no projeto e que esta mudança não criou nem piorou. Não contam na decisão; ficam aqui para o lead acompanhar.
+
 ## Não replicar                                                   (auditoria de projeto vivo)
 Padrões deste projeto que código novo não deve copiar, um por linha, prontos para colar no CLAUDE.md do projeto.
 ```
@@ -57,4 +60,4 @@ Written to `.sz/reports/verdict.json`. The seal script reads `maxSeverity` from 
 }
 ```
 
-`maxSeverity` is the highest among your findings and the mechanical ones in `verify.json`.
+`maxSeverity` is the highest among your findings about the change and `summary.maxSeverity` in `verify.json` (which already excludes pre-existing problems).

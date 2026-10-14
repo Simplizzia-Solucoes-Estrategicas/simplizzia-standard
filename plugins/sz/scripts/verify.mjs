@@ -5,7 +5,7 @@
 //                   [--json-out <file>] [--skip-gates] [--offline] [--cwd <dir>]
 //   node verify.mjs --seal                 end of a review: seals the reviewed content
 //   node verify.mjs --ci-protected --base <ref> --actor <login> [--lead <login>]
-//   node verify.mjs --route --verify <verify.json> [--actor <login>]
+//   node verify.mjs --route --verify <verify.json> [--actor <login>] [--event <name>] [--head <sha>]
 //
 // It reports; it never edits project files. Only --json-out writes, and only where told.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -17,6 +17,7 @@ import {
   classify,
   CODE_EXTENSIONS,
   contentHash,
+  isDocsOnly,
   isEnvFile,
   loadConfig,
   mask,
@@ -53,6 +54,8 @@ const { values: args } = parseArgs({
     route: { type: 'boolean', default: false },
     verify: { type: 'string' },
     seal: { type: 'boolean', default: false },
+    event: { type: 'string', default: '' },
+    head: { type: 'string', default: '' },
   },
 });
 
@@ -319,6 +322,23 @@ function newDependencies(root, base) {
 
 // ---------- main verification ----------
 
+function bySeverity(a, b) {
+  return SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity);
+}
+
+function introducedBy(changed, finding) {
+  if (finding.id === 'vulnerable-dependency') return changed.includes('package-lock.json');
+  return changed.some((file) => file === finding.file || file.startsWith(`${finding.file}/`));
+}
+
+function separatePreExisting(changed) {
+  const kept = findings.filter((finding) => introducedBy(changed, finding));
+  const old = findings.filter((finding) => !introducedBy(changed, finding));
+  findings.length = 0;
+  findings.push(...kept);
+  return old;
+}
+
 function verify() {
   const project = classify(args.cwd ?? process.cwd());
   const { root } = project;
@@ -344,10 +364,10 @@ function verify() {
 
   const sizes = [];
   for (const rel of targets) {
-    if (!CODE_EXTENSIONS.test(rel) && !isEnvFile(rel)) continue;
     const text = readText(root, rel);
     if (text === null) continue;
     checkSecrets(rel, text);
+    if (!CODE_EXTENSIONS.test(rel) && !isEnvFile(rel)) continue;
     checkPublicEnv(rel, text);
     checkKeysAndAdmin(rel, text);
     checkServerActions(rel, text);
@@ -379,7 +399,11 @@ function verify() {
     protectedChanged = changed.filter((rel) => matchesAny(rel, PROTECTED));
   }
 
-  findings.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
+  // A change is judged on what it introduces. Problems that were already in the project (a
+  // vulnerable dependency, an old pages/ folder) are listed apart and do not gate this change.
+  const preExisting = changed === null ? [] : separatePreExisting(changed);
+  findings.sort(bySeverity);
+  preExisting.sort(bySeverity);
   const counts = Object.fromEntries(SEVERITIES.map((severity) => [severity, findings.filter((item) => item.severity === severity).length]));
   const report = {
     tool: 'sz-verify',
@@ -392,6 +416,9 @@ function verify() {
     project: { kind: project.kind, tier: project.marker?.tier ?? null, standardVersion: project.marker?.standardVersion ?? null },
     gates,
     findings,
+    preExisting,
+    changedFiles: changed,
+    docsOnly: changed !== null && isDocsOnly(changed),
     sensitiveZones,
     newDependencies: dependenciesAdded,
     protectedChanged,
@@ -434,6 +461,10 @@ function toMarkdown(report) {
     lines.push(`- [${LABEL[item.severity]}] ${item.title} · ${item.file}${item.detail === '' ? '' : ` · ${item.detail}`}`);
     if (item.excerpt !== '') lines.push(`  \`${item.excerpt.replace(/`/g, "'")}\``);
   }
+  if (report.preExisting.length > 0) {
+    lines.push('', '## Pré-existentes (já estavam no projeto, não contam nesta mudança)');
+    for (const item of report.preExisting) lines.push(`- [${LABEL[item.severity]}] ${item.title} · ${item.file}${item.detail === '' ? '' : ` · ${item.detail}`}`);
+  }
   if (report.scope === 'changes') {
     lines.push('', '## Zonas sensíveis tocadas', ...(report.sensitiveZones.length === 0 ? ['- Nenhuma.'] : report.sensitiveZones.map((zone) => `- ${zone}`)));
   }
@@ -473,13 +504,37 @@ const SEAL_REASON = {
   stale: 'revisão local desatualizada: o código mudou depois da revisão',
 };
 
+const DEPLOY_PLACEHOLDER = 'Deploy ainda não configurado';
+
+function deployConfigured(root) {
+  const script = readPackage(root)?.scripts?.deploy;
+  return typeof script === 'string' && !script.includes(DEPLOY_PLACEHOLDER);
+}
+
+const HEADINGS = {
+  pull_request: { publish: 'pode fazer merge', 'lead-approval': 'merge depois da revisão do lead', block: 'TRAVADO' },
+  push: {
+    publish: 'publicar',
+    'no-deploy': 'aprovado · deploy ainda não configurado, nada foi publicado',
+    'lead-approval': 'aguardando aprovação do lead',
+    block: 'TRAVADO',
+  },
+};
+
+// Decides what happens to a change. On a pull request the question is whether it can be merged;
+// on a push to main, whether it can be deployed. Documentation-only changes skip the review seal.
 function route() {
   const report = readJson(args.verify);
   if (report === null) throw new Error('--route precisa de --verify <verify.json>');
   const project = classify(args.cwd ?? process.cwd());
-  const review = sealStatus(project.root, { fromHead: true });
+  const event = args.event !== '' ? args.event : (process.env.GITHUB_EVENT_NAME ?? 'push');
+  const isPullRequest = event === 'pull_request';
+  const docsOnly = report.docsOnly === true;
+  const review = sealStatus(project.root, { ref: safeRef(args.head) ?? 'HEAD' });
   const tier = report.project.tier ?? 1;
-  const max = highest([report.summary.maxSeverity, review.status === 'valid' ? review.seal.maxSeverity : null]);
+  const sealSeverity = !docsOnly && review.status === 'valid' ? review.seal.maxSeverity : null;
+  const max = highest([report.summary.maxSeverity, sealSeverity]);
+  const canDeploy = deployConfigured(project.root);
   const firstDeploy = run('git tag --list "deploy-*"', project.root, 10_000).stdout.trim() === '';
   const actor = args.actor !== '' ? args.actor : (process.env.GITHUB_ACTOR ?? '');
   const isLead = project.config.leadGithub !== '' && actor === project.config.leadGithub;
@@ -491,18 +546,24 @@ function route() {
     decision = 'block';
   } else {
     if (max === 'ALTO') reasons.push('achado ALTO');
-    if (review.status !== 'valid') reasons.push(SEAL_REASON[review.status]);
+    if (!docsOnly && review.status !== 'valid') reasons.push(SEAL_REASON[review.status]);
     if (tier >= 2 && report.sensitiveZones.length > 0) reasons.push(`zonas sensíveis: ${report.sensitiveZones.join(', ')}`);
-    if (tier >= 2 && firstDeploy) reasons.push('primeiro deploy de projeto nível 2+');
-    if (tier >= 3) reasons.push('projeto nível 3');
+    if (!isPullRequest && canDeploy && tier >= 2 && firstDeploy) reasons.push('primeiro deploy de projeto nível 2+');
+    if (!docsOnly && tier >= 3) reasons.push('projeto nível 3');
     if (reasons.length > 0) decision = 'lead-approval';
   }
+  if (decision === 'publish' && !isPullRequest && !canDeploy) decision = 'no-deploy';
+  const headings = isPullRequest ? HEADINGS.pull_request : HEADINGS.push;
+  const old = Array.isArray(report.preExisting) ? report.preExisting : [];
   const summary = [
-    `## Decisão: ${decision === 'publish' ? 'publicar' : decision === 'block' ? 'TRAVADO' : 'aguardando aprovação do lead'}`,
+    `## Decisão: ${headings[decision]}`,
     '',
-    `Nível ${String(tier)} · maior gravidade: ${LABEL[max] ?? 'nenhuma'}`,
+    `Nível ${String(tier)} · maior gravidade desta mudança: ${LABEL[max] ?? 'nenhuma'}${docsOnly ? ' · só documentação' : ''}`,
     ...reasons.map((reason) => `- ${reason}`),
-    ...(decision === 'lead-approval' ? ['', 'Para publicar: o lead revisa o relatório e roda o workflow manualmente com deploy = true.'] : []),
+    ...(decision === 'lead-approval' && !isPullRequest ? ['', 'Para publicar: o lead revisa o relatório e roda o workflow manualmente com deploy = true.'] : []),
+    ...(old.length > 0
+      ? ['', `Problemas que já existiam no projeto (não contam nesta mudança): ${String(old.length)}`, ...old.slice(0, 5).map((item) => `- [${LABEL[item.severity]}] ${item.title} · ${item.file}`)]
+      : []),
   ].join('\n');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `decision=${decision}\nis_lead=${String(isLead)}\n`);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);

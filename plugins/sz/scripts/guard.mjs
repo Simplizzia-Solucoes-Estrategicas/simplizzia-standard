@@ -9,11 +9,13 @@ import {
   AGENT_PROTECTED,
   classify,
   CODE_EXTENSIONS,
+  isDocsOnly,
   isEnvFile,
   matchesAny,
   PUBLIC_SECRET_ENV,
   readHookInput,
   relativePosix,
+  run,
   readSeal,
   SEAL_FILE,
   sealStatus,
@@ -104,10 +106,23 @@ const PROTECTED_NAME = String.raw`(?:eslint\.config\.[cm]?[jt]s|tsconfig[\w.-]*\
 const REDIRECT_TO_PROTECTED = new RegExp(String.raw`(?:>>?|\btee\s+(?:-a\s+)?)\s*["']?[^\s"'|;&]*` + PROTECTED_NAME);
 const MUTATING_COMMAND = /\b(?:sed\s+-i|perl\s+-pi|mv|cp|rm|Set-Content|Out-File|Add-Content|Remove-Item|git\s+(?:checkout|restore))\b/;
 
-// A push sends HEAD, so HEAD must carry a seal that matches its own content.
+// Files in the commits a push would send, when the remote branch is known.
+function filesToPush(root) {
+  for (const upstream of ['@{upstream}', 'origin/HEAD', 'origin/main']) {
+    if (run(`git rev-parse --verify --quiet "${upstream}"`, root, 10_000).code !== 0) continue;
+    const diff = run(`git diff --name-only "${upstream}...HEAD"`, root, 15_000);
+    if (diff.code === 0) return diff.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+  return null;
+}
+
+// A push sends HEAD, so HEAD must carry a seal that matches its own content. Pushes made only
+// of documentation need no review.
 function checkPush(project) {
   const committed = sealStatus(project.root, { fromHead: true });
   if (committed.status === 'valid') return;
+  const pushed = filesToPush(project.root);
+  if (pushed !== null && isDocsOnly(pushed)) return;
   const local = sealStatus(project.root);
   if (local.status === 'valid') {
     deny(`Bloqueado: a revisão está feita, mas ${SEAL_FILE} não foi commitado. Commite o arquivo (junto com o código revisado) e tente o push de novo.`);

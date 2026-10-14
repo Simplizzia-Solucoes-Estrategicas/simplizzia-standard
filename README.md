@@ -68,6 +68,8 @@ O guard só libera o push quando o commit carrega um selo que bate com o própri
 
 No CI, se o selo bate, a gravidade dele entra na decisão. Se falta ou está desatualizado, o deploy vai para a aprovação do lead, sem travar. É o que acontece com push feito fora do Claude Code e com o primeiro push de todo projeto novo.
 
+Uma mudança é julgada pelo que ela introduz. Problemas que já estavam no projeto (uma versão vulnerável do Next, um arquivo antigo fora do padrão) aparecem no resumo como pré-existentes e não travam nem mandam para aprovação. Mudanças só de documentação (`*.md`, `docs/`) não precisam de revisão nem de selo, e editar documentação depois da revisão não invalida o selo. Em pull request, o CI diz se dá para fazer merge; a pergunta sobre deploy só aparece no push para a `main`, e enquanto o deploy do projeto não estiver configurado o job de deploy nem roda.
+
 O selo protege contra esquecimento e pressa, não contra alguém decidido a burlar. Contra isso, vale a aprovação do lead nas zonas sensíveis.
 
 ## Fluxo
@@ -80,7 +82,7 @@ O script `deploy` de cada projeto começa falhando de propósito, com uma mensag
 
 ## O que foi testado
 
-Tudo abaixo rodou numa app real gerada pelo create-next-app 16.3.6, com as dependências instaladas.
+Tudo abaixo rodou numa app real gerada pelo create-next-app 16.4.1, com as dependências instaladas.
 
 - **Scaffold.** Templates e o exemplo de clientes passam no typecheck e no lint estrito. O typecheck roda `next typegen`, que valida a assinatura dos route handlers.
 - **Lint.** Um arquivo com 10 violações foi barrado nas 10.

@@ -60,7 +60,10 @@ runs:
       shell: bash
       env:
         ACTOR: ${{ github.actor }}
-      run: node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --route --verify .sz/reports/verify.json --actor "$ACTOR"
+        EVENT: ${{ github.event_name }}
+        # On a pull request the checkout is GitHub's merge commit; the seal belongs to the PR head.
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --route --verify .sz/reports/verify.json --actor "$ACTOR" --event "$EVENT" --head "$HEAD_SHA"
 
     - uses: actions/upload-artifact@v4
       if: always()

@@ -1,6 +1,6 @@
 {
   "name": "sz",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Simplizzia engineering standard: new-project, audit, review and fix skills, plus hooks that guard every session.",
   "author": { "name": "Simplizzia" }
 }

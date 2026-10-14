@@ -187,18 +187,36 @@ function git(root, args, env = process.env) {
   return { code: result.status ?? 1, stdout: result.stdout ?? '' };
 }
 
-// Tree hash of the project content as git sees it (ignored files excluded, seal excluded).
-// fromHead: the committed tree, which is what a push sends and what CI checks out.
+// Changes made only of these files never need a review or the lead: text that does not run.
+export const DOCS = ['**/*.md', 'docs/**', SEAL_FILE, '.sz/reports/**'];
+
+export function isDocsOnly(files) {
+  return files.length > 0 && files.every((file) => matchesAny(file, DOCS));
+}
+
+function refOf(options) {
+  if (typeof options.ref === 'string' && options.ref !== '') return options.ref;
+  return options.fromHead === true ? 'HEAD' : null;
+}
+
+// Tree hash of the project content as git sees it (ignored files, the seal and documentation
+// excluded, so fixing a README after a review does not invalidate it).
+// ref (or fromHead for HEAD): a committed tree, which is what a push sends and CI checks out.
 // Otherwise: the working tree, committed or not. Starting from HEAD keeps the committed file
 // modes, and git's own normalization keeps Windows line endings from changing the hash.
-export function contentHash(root, { fromHead = false } = {}) {
+export function contentHash(root, options = {}) {
+  const ref = refOf(options);
   const index = join(tmpdir(), `sz-index-${String(process.pid)}-${String(Date.now())}`);
   const env = { ...process.env, GIT_INDEX_FILE: index };
   try {
-    const hasHead = git(root, ['rev-parse', '--verify', '--quiet', 'HEAD']).code === 0;
-    if (git(root, hasHead ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'], env).code !== 0) return null;
-    if (!fromHead && git(root, ['add', '-A'], env).code !== 0) return null;
-    git(root, ['rm', '--cached', '--quiet', '--ignore-unmatch', SEAL_FILE], env);
+    const start = ref ?? 'HEAD';
+    const exists = git(root, ['rev-parse', '--verify', '--quiet', `${start}^{commit}`]).code === 0;
+    if (ref !== null && !exists) return null;
+    if (git(root, exists ? ['read-tree', start] : ['read-tree', '--empty'], env).code !== 0) return null;
+    if (ref === null && git(root, ['add', '-A'], env).code !== 0) return null;
+    // --force: the temporary index may hold another commit's tree, which git rm would
+    // otherwise refuse to touch because it differs from both HEAD and the working tree.
+    git(root, ['rm', '-r', '-f', '--cached', '--quiet', '--ignore-unmatch', '--', SEAL_FILE, ':(glob)**/*.md', 'docs'], env);
     const tree = git(root, ['write-tree'], env);
     return tree.code === 0 ? tree.stdout.trim() : null;
   } finally {
@@ -206,10 +224,11 @@ export function contentHash(root, { fromHead = false } = {}) {
   }
 }
 
-export function readSeal(root, { fromHead = false } = {}) {
+export function readSeal(root, options = {}) {
+  const ref = refOf(options);
   let raw = null;
-  if (fromHead) {
-    const shown = git(root, ['show', `HEAD:${SEAL_FILE}`]);
+  if (ref !== null) {
+    const shown = git(root, ['show', `${ref}:${SEAL_FILE}`]);
     raw = shown.code === 0 ? shown.stdout : null;
   } else if (existsSync(join(root, SEAL_FILE))) {
     raw = readFileSync(join(root, SEAL_FILE), 'utf8');
@@ -223,7 +242,7 @@ export function readSeal(root, { fromHead = false } = {}) {
 }
 
 // valid: the seal describes exactly this content · stale: content changed after the review
-// · missing: never reviewed (or the seal was not committed, when fromHead).
+// · missing: never reviewed (or the seal was not committed, when reading a commit).
 export function sealStatus(root, options = {}) {
   const seal = readSeal(root, options);
   if (seal === null || seal.invalid === true) return { status: 'missing', seal: null };
