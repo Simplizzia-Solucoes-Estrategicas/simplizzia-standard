@@ -18,6 +18,7 @@ function coreRules(lead) {
     `5. Fix root causes. Before changing code to fix a bug, tell the user the cause in one sentence. After 3 failed attempts, stop and ask the user to call ${lead}. No hidden workarounds: if the real fix is out of reach, present the options and, if a workaround is chosen, open a GitHub issue for it.`,
     '6. Small single-purpose files. Split by responsibility, never by size. Search for an existing component, hook or util before creating one; a piece used by a second screen moves to src/components/ or src/data/.',
     '7. Before saying something is done, run `npm run check` and show its output. Before pushing, run the sz:review skill: a push without a current review seal is blocked.',
+    '8. Publish by committing to main and pushing main. Never create branches or pull requests unless the user explicitly asks: the people here do not use pull requests, and the lead approves deploys, not merges. If the push is rejected because main moved, run `git pull --rebase`, review again and push.',
   ].join('\n');
 }
 

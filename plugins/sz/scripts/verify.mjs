@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Mechanical checks of the Simplizzia standard, shared by /sz:audit, /sz:review and CI.
 //
-//   node verify.mjs [--scope project|changes] [--base <ref>] [--format md|json]
+//   node verify.mjs [--scope project|changes] [--base <ref>] [--since-deploy] [--format md|json]
 //                   [--json-out <file>] [--skip-gates] [--offline] [--cwd <dir>]
 //   node verify.mjs --seal                 end of a review: seals the reviewed content
 //   node verify.mjs --ci-protected --base <ref> --actor <login> [--lead <login>]
@@ -47,6 +47,7 @@ const { values: args } = parseArgs({
     'json-out': { type: 'string' },
     'skip-gates': { type: 'boolean', default: false },
     offline: { type: 'boolean', default: false },
+    'since-deploy': { type: 'boolean', default: false },
     cwd: { type: 'string' },
     'ci-protected': { type: 'boolean', default: false },
     actor: { type: 'string', default: '' },
@@ -320,6 +321,36 @@ function newDependencies(root, base) {
   return [...dependencyNames(readPackage(root))].filter((name) => !previous.has(name));
 }
 
+// ---------- deploy-aware base ----------
+
+const DEPLOY_PLACEHOLDER = 'Deploy ainda não configurado';
+
+function deployConfigured(root) {
+  const script = readPackage(root)?.scripts?.deploy;
+  return typeof script === 'string' && !script.includes(DEPLOY_PLACEHOLDER);
+}
+
+function lastDeployTag(root) {
+  const result = run('git describe --tags --abbrev=0 --match "deploy-*" HEAD', root, 10_000);
+  return result.code === 0 ? result.stdout.trim() : null;
+}
+
+function rootCommit(root) {
+  const result = run('git rev-list --max-parents=0 HEAD', root, 10_000);
+  return result.code === 0 ? (result.stdout.trim().split('\n').pop() ?? null) : null;
+}
+
+// Once a project deploys, a change is everything not yet deployed: a change waiting for the
+// lead stays in the next push's verdict instead of riding along with a harmless push. Before
+// the first deploy the whole project since creation is pending; with no deploy configured,
+// nothing ships, so the fallback (the push range, or origin/main locally) is enough.
+function deployBase(root, fallback) {
+  const tag = lastDeployTag(root);
+  if (tag !== null) return tag;
+  if (deployConfigured(root)) return rootCommit(root) ?? fallback;
+  return fallback;
+}
+
 // ---------- main verification ----------
 
 function bySeverity(a, b) {
@@ -343,7 +374,10 @@ function verify() {
   const project = classify(args.cwd ?? process.cwd());
   const { root } = project;
   const scope = args.scope === 'changes' ? 'changes' : 'project';
-  const base = scope === 'changes' ? resolveBase(root, args.base) : null;
+  // Local reviews (no --base) and pushes to main (--since-deploy) judge what is not deployed yet;
+  // pull requests pass their own base.
+  const requested = args['since-deploy'] || args.base === undefined ? deployBase(root, args.base) : args.base;
+  const base = scope === 'changes' ? resolveBase(root, requested) : null;
   if (scope === 'changes' && base === null) notes.push('Sem commit base para comparar; analisado o projeto inteiro.');
   const files = listFiles(root);
   const changed = base === null ? null : changedFiles(root, base, !process.env.CI);
@@ -504,13 +538,6 @@ const SEAL_REASON = {
   stale: 'revisão local desatualizada: o código mudou depois da revisão',
 };
 
-const DEPLOY_PLACEHOLDER = 'Deploy ainda não configurado';
-
-function deployConfigured(root) {
-  const script = readPackage(root)?.scripts?.deploy;
-  return typeof script === 'string' && !script.includes(DEPLOY_PLACEHOLDER);
-}
-
 const HEADINGS = {
   pull_request: { publish: 'pode fazer merge', 'lead-approval': 'merge depois da revisão do lead', block: 'TRAVADO' },
   push: {
@@ -552,7 +579,12 @@ function route() {
     if (!docsOnly && tier >= 3) reasons.push('projeto nível 3');
     if (reasons.length > 0) decision = 'lead-approval';
   }
-  if (decision === 'publish' && !isPullRequest && !canDeploy) decision = 'no-deploy';
+  if (decision !== 'block' && !isPullRequest && !canDeploy) {
+    // Nothing ships until the lead configures the deploy, so nothing can wait for the lead
+    // either; the first deploy judges everything since the project was created.
+    decision = 'no-deploy';
+    reasons.splice(0, reasons.length, ...reasons.filter((reason) => reason === 'achado ALTO'));
+  }
   const headings = isPullRequest ? HEADINGS.pull_request : HEADINGS.push;
   const old = Array.isArray(report.preExisting) ? report.preExisting : [];
   const summary = [

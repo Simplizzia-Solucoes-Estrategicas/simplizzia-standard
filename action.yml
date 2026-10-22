@@ -53,7 +53,12 @@ runs:
       shell: bash
       env:
         BASE: ${{ steps.base.outputs.ref }}
-      run: node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --scope changes --base "$BASE" --skip-gates --json-out .sz/reports/verify.json
+        EVENT: ${{ github.event_name }}
+      # Pushes and manual deploys judge everything not deployed yet; a pull request, only itself.
+      run: |
+        since=""
+        if [ "$EVENT" != "pull_request" ]; then since="--since-deploy"; fi
+        node "$GITHUB_ACTION_PATH/plugins/sz/scripts/verify.mjs" --scope changes --base "$BASE" $since --skip-gates --json-out .sz/reports/verify.json
 
     - name: Route
       id: route

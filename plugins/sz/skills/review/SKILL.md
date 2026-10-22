@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob, Write, Bash(node:*), Bash(git diff:*), Bash(git
 
 # Review
 
-Reviews the change (not the whole project) before it goes out, in a context separate from the session that wrote the code, so the author's reasoning does not steer the verdict. Never ask questions and never edit application code during a review. It ends with a seal: CI and the push guard accept only a push whose content matches the reviewed content.
+Reviews the change (not the whole project) before it goes out, in a context separate from the session that wrote the code, so the author's reasoning does not steer the verdict. Once the project deploys, the change is everything not deployed yet (since the last `deploy-*` tag), so work still waiting for the lead is reviewed again with each push until it ships. Never ask questions and never edit application code during a review. It ends with a seal: CI and the push guard accept only a push whose content matches the reviewed content.
 
 ## Mechanical results
 
@@ -33,7 +33,7 @@ The tier is in `.sz/project.json`; the base commit is `base` in `.sz/reports/ver
 1. `.sz/reports/review.md`: the report in the "Revisão" format of `${CLAUDE_PLUGIN_ROOT}/references/report.md`, in Portuguese.
 2. `.sz/reports/verdict.json`: exactly the schema in `report.md`. `maxSeverity` is the highest of `summary.maxSeverity` in `verify.json` and your own findings about the change; pre-existing problems stay out.
 3. The seal: `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify.mjs" --seal`. If it refuses (content changed, typecheck or lint failing), report why and stop; never work around it.
-4. Your final message, in Portuguese, 3 to 6 lines: what blocks, what will wait for the lead, what is fine, and that `.sz/review.json` must be committed together with the reviewed code before the push.
+4. Your final message, in Portuguese, 3 to 6 lines: what blocks, what will wait for the lead, what is fine, and that `.sz/review.json` must be committed together with the reviewed code and pushed straight to main (no branch, no pull request).
 
 ## Decision (the rule CI applies)
 
